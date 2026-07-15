@@ -137,7 +137,7 @@ fill {
 
     build {
         channel = BuildChannel.STABLE
-        versionFamily("4.0.0")
+        versionFamily("1.0.0")
         version(projectVersion)
 
         if (versionFamily.get().split(".")[0] != projectVersion.split(".")[0]) {
