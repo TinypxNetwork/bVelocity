@@ -17,17 +17,22 @@
 
 package com.velocitypowered.proxy.protocol.netty;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.velocitypowered.api.network.ProtocolVersion;
 import com.velocitypowered.natives.compression.JavaVelocityCompressor;
+import com.velocitypowered.natives.compression.VelocityCompressor;
 import com.velocitypowered.proxy.connection.MinecraftConnection;
 import com.velocitypowered.proxy.protocol.ProtocolUtils;
 import com.velocitypowered.proxy.protocol.StateRegistry;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.buffer.UnpooledByteBufAllocator;
+import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.embedded.EmbeddedChannel;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -100,6 +105,26 @@ class MinecraftBandwidthHandlerTest {
     final var report = stats.packetReport(DirectionFilter.OUTBOUND, 10, 3);
     assertEquals(expectedWireBytes, report.totalBytes());
     assertEquals(1L, report.totalPackets());
+  }
+
+  @Test
+  void outboundCompressionAllowsSyntheticContextWithoutChannel() throws Exception {
+    final ChannelHandlerContext context = mock(ChannelHandlerContext.class);
+    when(context.channel()).thenReturn(null);
+    when(context.alloc()).thenReturn(UnpooledByteBufAllocator.DEFAULT);
+    final ExposedCompressor encoder = new ExposedCompressor(
+        1, JavaVelocityCompressor.FACTORY.create(6), 16, false);
+    final ByteBuf rawPacket = Unpooled.buffer();
+    ProtocolUtils.writeVarInt(rawPacket, 0x45);
+    rawPacket.writeZero(4096);
+    final ByteBuf encoded = Unpooled.buffer();
+
+    assertDoesNotThrow(() -> encoder.encodeForTest(context, rawPacket, encoded));
+    assertTrue(encoded.isReadable());
+    assertEquals(0L, stats.packetReport(DirectionFilter.OUTBOUND, 10, 3).totalBytes());
+
+    rawPacket.release();
+    encoded.release();
   }
 
   @Test
@@ -179,5 +204,18 @@ class MinecraftBandwidthHandlerTest {
     final var report = stats.packetReport(DirectionFilter.INBOUND, 10, 3);
     assertEquals(expectedWireBytes, report.totalBytes());
     assertEquals(1L, report.totalPackets());
+  }
+
+  private static final class ExposedCompressor extends MinecraftCompressorAndLengthEncoder {
+
+    private ExposedCompressor(int threshold, VelocityCompressor compressor,
+        int compressBoundHeadroom, boolean statsEnabled) {
+      super(threshold, compressor, compressBoundHeadroom, statsEnabled);
+    }
+
+    private void encodeForTest(ChannelHandlerContext ctx, ByteBuf msg, ByteBuf out)
+        throws Exception {
+      encode(ctx, msg, out);
+    }
   }
 }

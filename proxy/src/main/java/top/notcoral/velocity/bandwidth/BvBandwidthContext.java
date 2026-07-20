@@ -142,7 +142,13 @@ public final class BvBandwidthContext {
    * @param wireBytes the final encoded Minecraft frame size
    */
   public static void recordOutbound(ChannelHandlerContext ctx, int wireBytes) {
-    final OutboundSample sample = ctx.channel().attr(OUTBOUND_SAMPLE).get();
+    final Channel channel = ctx == null ? null : ctx.channel();
+    if (channel == null) {
+      // FastPrepare/LimboAPI invokes the codec reflectively with a synthetic context that only
+      // provides an allocator. There is no player channel to attribute or count in that path.
+      return;
+    }
+    final OutboundSample sample = channel.attr(OUTBOUND_SAMPLE).get();
     if (sample != null) {
       BvBandwidthStats.INSTANCE.record(sample.packetKey(), sample.player(), wireBytes);
     }
