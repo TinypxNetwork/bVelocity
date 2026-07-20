@@ -51,6 +51,13 @@ import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.minimessage.translation.Argument;
+import top.notcoral.velocity.bandwidth.BvBandwidthStats;
+import top.notcoral.velocity.bandwidth.BvBandwidthStats.DirectionFilter;
+import top.notcoral.velocity.bandwidth.BvBandwidthStats.PacketReport;
+import top.notcoral.velocity.bandwidth.BvBandwidthStats.PacketRow;
+import top.notcoral.velocity.bandwidth.BvBandwidthStats.PlayerReport;
+import top.notcoral.velocity.bandwidth.BvBandwidthStats.PlayerRow;
+import top.notcoral.velocity.bandwidth.BvBandwidthStats.TrafficDirection;
 import top.notcoral.velocity.compression.BvCompressionStats;
 
 /**
@@ -61,12 +68,18 @@ public final class BvCommand {
   private static final String ROOT_COMMAND = "/bvelocity";
   private static final String SIZE_ARG = "bytes";
   private static final String ROUNDS_ARG = "rounds";
+  private static final String PACKET_TOP_ARG = "packetTop";
+  private static final String PLAYER_TOP_ARG = "playerTop";
   private static final NamedTextColor ACCENT = NamedTextColor.AQUA;
   private static final NamedTextColor MUTED = NamedTextColor.DARK_GRAY;
   private static final NamedTextColor VALUE = NamedTextColor.WHITE;
   private static final NamedTextColor GOOD = NamedTextColor.GREEN;
   private static final int DEFAULT_BENCHMARK_BYTES = 32768;
   private static final int DEFAULT_BENCHMARK_ROUNDS = 64;
+  private static final int DEFAULT_PACKET_TOP = 10;
+  private static final int DEFAULT_PACKET_PLAYER_TOP = 3;
+  private static final int DEFAULT_PLAYER_TOP = 10;
+  private static final int MAX_BANDWIDTH_TOP = 50;
 
   private BvCommand() {
   }
@@ -142,8 +155,28 @@ public final class BvCommand {
         .then(compressionBenchmark)
         .build();
 
+    final LiteralCommandNode<CommandSource> bandwidthPackets = buildBandwidthPackets(server);
+    final LiteralCommandNode<CommandSource> bandwidthPlayers = buildBandwidthPlayers(server);
+    final LiteralCommandNode<CommandSource> bandwidthReset = BrigadierCommand
+        .literalArgumentBuilder("reset")
+        .requires(source ->
+            source.getPermissionValue("bvelocity.command.bandwidth.reset") == Tristate.TRUE)
+        .executes(new BandwidthReset())
+        .build();
+    final LiteralCommandNode<CommandSource> bandwidth = BrigadierCommand
+        .literalArgumentBuilder("bandwidth")
+        .requires(source ->
+            source.getPermissionValue("bvelocity.command.bandwidth") == Tristate.TRUE
+                || source.getPermissionValue("bvelocity.command.bandwidth.reset")
+                == Tristate.TRUE)
+        .executes(new BandwidthRoot(server))
+        .then(bandwidthPackets)
+        .then(bandwidthPlayers)
+        .then(bandwidthReset)
+        .build();
+
     final List<LiteralCommandNode<CommandSource>> commands =
-        List.of(status, backend, config, compression);
+        List.of(status, backend, config, compression, bandwidth);
     return new BrigadierCommand(
         commands.stream()
             .reduce(
@@ -165,6 +198,69 @@ public final class BvCommand {
                 ArgumentBuilder::then
             )
     );
+  }
+
+  private static LiteralCommandNode<CommandSource> buildBandwidthPackets(VelocityServer server) {
+    final var root = BrigadierCommand.literalArgumentBuilder("packets")
+        .requires(source ->
+            source.getPermissionValue("bvelocity.command.bandwidth") == Tristate.TRUE)
+        .executes(new BandwidthPackets(
+            server, DirectionFilter.ALL, DEFAULT_PACKET_TOP, DEFAULT_PACKET_PLAYER_TOP));
+
+    root.then(packetTopArguments(server, DirectionFilter.ALL));
+    for (DirectionFilter direction : DirectionFilter.values()) {
+      root.then(BrigadierCommand.literalArgumentBuilder(direction.name().toLowerCase(Locale.ROOT))
+          .executes(new BandwidthPackets(
+              server, direction, DEFAULT_PACKET_TOP, DEFAULT_PACKET_PLAYER_TOP))
+          .then(packetTopArguments(server, direction)));
+    }
+    return root.build();
+  }
+
+  private static ArgumentBuilder<CommandSource, ?> packetTopArguments(
+      VelocityServer server, DirectionFilter direction) {
+    return BrigadierCommand.requiredArgumentBuilder(
+            PACKET_TOP_ARG, IntegerArgumentType.integer(1, MAX_BANDWIDTH_TOP))
+        .executes(ctx -> new BandwidthPackets(
+            server,
+            direction,
+            IntegerArgumentType.getInteger(ctx, PACKET_TOP_ARG),
+            DEFAULT_PACKET_PLAYER_TOP
+        ).run(ctx))
+        .then(BrigadierCommand.requiredArgumentBuilder(
+                PLAYER_TOP_ARG, IntegerArgumentType.integer(1, MAX_BANDWIDTH_TOP))
+            .executes(ctx -> new BandwidthPackets(
+                server,
+                direction,
+                IntegerArgumentType.getInteger(ctx, PACKET_TOP_ARG),
+                IntegerArgumentType.getInteger(ctx, PLAYER_TOP_ARG)
+            ).run(ctx)));
+  }
+
+  private static LiteralCommandNode<CommandSource> buildBandwidthPlayers(VelocityServer server) {
+    final var root = BrigadierCommand.literalArgumentBuilder("players")
+        .requires(source ->
+            source.getPermissionValue("bvelocity.command.bandwidth") == Tristate.TRUE)
+        .executes(new BandwidthPlayers(server, DirectionFilter.ALL, DEFAULT_PLAYER_TOP));
+
+    root.then(playerTopArguments(server, DirectionFilter.ALL));
+    for (DirectionFilter direction : DirectionFilter.values()) {
+      root.then(BrigadierCommand.literalArgumentBuilder(direction.name().toLowerCase(Locale.ROOT))
+          .executes(new BandwidthPlayers(server, direction, DEFAULT_PLAYER_TOP))
+          .then(playerTopArguments(server, direction)));
+    }
+    return root.build();
+  }
+
+  private static ArgumentBuilder<CommandSource, ?> playerTopArguments(
+      VelocityServer server, DirectionFilter direction) {
+    return BrigadierCommand.requiredArgumentBuilder(
+            PLAYER_TOP_ARG, IntegerArgumentType.integer(1, MAX_BANDWIDTH_TOP))
+        .executes(ctx -> new BandwidthPlayers(
+            server,
+            direction,
+            IntegerArgumentType.getInteger(ctx, PLAYER_TOP_ARG)
+        ).run(ctx));
   }
 
   private record Status(VelocityServer server) implements Command<CommandSource> {
@@ -412,6 +508,216 @@ public final class BvCommand {
     }
   }
 
+  private record BandwidthRoot(VelocityServer server) implements Command<CommandSource> {
+
+    @Override
+    public int run(CommandContext<CommandSource> context) {
+      final CommandSource source = context.getSource();
+      if (source.getPermissionValue("bvelocity.command.bandwidth") == Tristate.TRUE) {
+        return new BandwidthPackets(
+            server, DirectionFilter.ALL, DEFAULT_PACKET_TOP, DEFAULT_PACKET_PLAYER_TOP)
+            .run(context);
+      }
+      sendHeader(source, Component.translatable("bvelocity.command.help-title", ACCENT));
+      sendCommandLine(
+          source,
+          "bvelocity.command.help-bandwidth-reset",
+          ROOT_COMMAND + " bandwidth reset"
+      );
+      return Command.SINGLE_SUCCESS;
+    }
+  }
+
+  private record BandwidthPackets(
+      VelocityServer server,
+      DirectionFilter direction,
+      int packetTop,
+      int playerTop
+  ) implements Command<CommandSource> {
+
+    @Override
+    public int run(CommandContext<CommandSource> context) {
+      final CommandSource source = context.getSource();
+      if (!bandwidthStatsEnabled(server, source)) {
+        return Command.SINGLE_SUCCESS;
+      }
+
+      final PacketReport report =
+          BvBandwidthStats.INSTANCE.packetReport(direction, packetTop, playerTop);
+      sendSectionTitle(source, "bvelocity.command.bandwidth-packets-title");
+      sendBandwidthSummary(
+          source, direction, report.elapsedSeconds(), report.totalBytes(), report.totalPackets());
+      sendUnattributed(source, report.unattributedBytes(), report.totalBytes());
+
+      if (report.rows().isEmpty()) {
+        sendStatLine(source, Component.translatable(
+            "bvelocity.command.bandwidth-empty", NamedTextColor.YELLOW));
+        return Command.SINGLE_SUCCESS;
+      }
+
+      int rank = 1;
+      for (PacketRow row : report.rows()) {
+        sendStatLine(source, Component.translatable(
+            "bvelocity.command.bandwidth-packet-row",
+            VALUE,
+            Argument.string("rank", Integer.toString(rank++)),
+            Argument.component("direction", trafficDirectionComponent(row.key().direction())),
+            Argument.string("packet", row.key().displayName()),
+            Argument.string("bytes", humanBytes(row.bytes())),
+            Argument.string("percent", percentOf(row.bytes(), report.totalBytes())),
+            Argument.string("packets", Long.toString(row.packets())),
+            Argument.string("rate", averageRate(row.bytes(), report.elapsedSeconds()))
+        ));
+        for (PlayerRow player : row.players()) {
+          sendNestedLine(source, Component.translatable(
+              "bvelocity.command.bandwidth-packet-player-row",
+              NamedTextColor.GRAY,
+              Argument.string("player", player.identity().name()),
+              Argument.string("bytes", humanBytes(player.bytes())),
+              Argument.string("packetPercent", percentOf(player.bytes(), row.bytes())),
+              Argument.string("totalPercent", percentOf(player.bytes(), report.totalBytes()))
+          ));
+        }
+        if (row.unattributedBytes() > 0L) {
+          sendNestedLine(source, Component.translatable(
+              "bvelocity.command.bandwidth-packet-player-row",
+              NamedTextColor.DARK_GRAY,
+              Argument.component("player", Component.translatable(
+                  "bvelocity.command.bandwidth-unattributed-name")),
+              Argument.string("bytes", humanBytes(row.unattributedBytes())),
+              Argument.string(
+                  "packetPercent", percentOf(row.unattributedBytes(), row.bytes())),
+              Argument.string(
+                  "totalPercent", percentOf(row.unattributedBytes(), report.totalBytes()))
+          ));
+        }
+      }
+      return Command.SINGLE_SUCCESS;
+    }
+  }
+
+  private record BandwidthPlayers(
+      VelocityServer server,
+      DirectionFilter direction,
+      int playerTop
+  ) implements Command<CommandSource> {
+
+    @Override
+    public int run(CommandContext<CommandSource> context) {
+      final CommandSource source = context.getSource();
+      if (!bandwidthStatsEnabled(server, source)) {
+        return Command.SINGLE_SUCCESS;
+      }
+
+      final PlayerReport report =
+          BvBandwidthStats.INSTANCE.playerReport(direction, playerTop);
+      sendSectionTitle(source, "bvelocity.command.bandwidth-players-title");
+      sendBandwidthSummary(
+          source, direction, report.elapsedSeconds(), report.totalBytes(), report.totalPackets());
+      sendUnattributed(source, report.unattributedBytes(), report.totalBytes());
+
+      if (report.rows().isEmpty()) {
+        sendStatLine(source, Component.translatable(
+            "bvelocity.command.bandwidth-empty", NamedTextColor.YELLOW));
+        return Command.SINGLE_SUCCESS;
+      }
+
+      int rank = 1;
+      for (PlayerRow row : report.rows()) {
+        final boolean online = row.identity().uuid() != null
+            && server.getPlayer(row.identity().uuid()).isPresent();
+        sendStatLine(source, Component.translatable(
+            "bvelocity.command.bandwidth-player-row",
+            VALUE,
+            Argument.string("rank", Integer.toString(rank++)),
+            Argument.string("player", row.identity().name()),
+            Argument.component("status", Component.translatable(online
+                ? "bvelocity.command.bandwidth-online"
+                : "bvelocity.command.bandwidth-offline")),
+            Argument.string("bytes", humanBytes(row.bytes())),
+            Argument.string("percent", percentOf(row.bytes(), report.totalBytes())),
+            Argument.string("packets", Long.toString(row.packets())),
+            Argument.string("rate", averageRate(row.bytes(), report.elapsedSeconds()))
+        ));
+      }
+      return Command.SINGLE_SUCCESS;
+    }
+  }
+
+  private record BandwidthReset() implements Command<CommandSource> {
+
+    @Override
+    public int run(CommandContext<CommandSource> context) {
+      BvBandwidthStats.INSTANCE.reset();
+      context.getSource().sendMessage(Component.translatable(
+          "bvelocity.command.bandwidth-reset", NamedTextColor.GREEN));
+      return Command.SINGLE_SUCCESS;
+    }
+  }
+
+  private static boolean bandwidthStatsEnabled(VelocityServer server, CommandSource source) {
+    if (server.getBvConfiguration().getOptimization().isPacketBandwidthStatsEnabled()) {
+      return true;
+    }
+    sendStatLine(source, Component.translatable(
+        "bvelocity.command.bandwidth-disabled", NamedTextColor.YELLOW));
+    return false;
+  }
+
+  private static void sendBandwidthSummary(CommandSource source, DirectionFilter direction,
+      long elapsedSeconds, long totalBytes, long totalPackets) {
+    sendStatLine(source, Component.translatable(
+        "bvelocity.command.bandwidth-summary",
+        VALUE,
+        Argument.component("direction", directionComponent(direction)),
+        Argument.string("seconds", Long.toString(elapsedSeconds)),
+        Argument.string("bytes", humanBytes(totalBytes)),
+        Argument.string("rate", averageRate(totalBytes, elapsedSeconds)),
+        Argument.string("packets", Long.toString(totalPackets))
+    ));
+  }
+
+  private static void sendUnattributed(CommandSource source, long unattributed, long total) {
+    if (unattributed <= 0L) {
+      return;
+    }
+    sendStatLine(source, Component.translatable(
+        "bvelocity.command.bandwidth-unattributed",
+        NamedTextColor.DARK_GRAY,
+        Argument.string("bytes", humanBytes(unattributed)),
+        Argument.string("percent", percentOf(unattributed, total))
+    ));
+  }
+
+  private static Component directionComponent(DirectionFilter direction) {
+    final String translationKey = switch (direction) {
+      case ALL -> "bvelocity.command.bandwidth-direction-all";
+      case OUTBOUND -> "bvelocity.command.bandwidth-direction-outbound";
+      case INBOUND -> "bvelocity.command.bandwidth-direction-inbound";
+    };
+    return Component.translatable(translationKey, ACCENT);
+  }
+
+  private static Component trafficDirectionComponent(TrafficDirection direction) {
+    return Component.translatable(direction == TrafficDirection.OUTBOUND
+        ? "bvelocity.command.bandwidth-direction-outbound-short"
+        : "bvelocity.command.bandwidth-direction-inbound-short", ACCENT);
+  }
+
+  private static String percentOf(long part, long total) {
+    if (total <= 0L) {
+      return "0.00%";
+    }
+    return String.format(Locale.ROOT, "%.2f%%", (double) part / (double) total * 100.0d);
+  }
+
+  private static String averageRate(long bytes, long elapsedSeconds) {
+    if (elapsedSeconds <= 0L) {
+      return "0 B/s";
+    }
+    return humanBytes(bytes / elapsedSeconds) + "/s";
+  }
+
   private static String describeLevel(int configuredLevel) {
     return configuredLevel == -1
         ? "auto(native=" + CompressionLevelUtil.AGGRESSIVE_NATIVE_DEFAULT
@@ -475,6 +781,21 @@ public final class BvCommand {
         "bvelocity.command.help-benchmark",
         ROOT_COMMAND + " compression benchmark 32768 64"
     );
+    sendCommandLine(
+        source,
+        "bvelocity.command.help-bandwidth",
+        ROOT_COMMAND + " bandwidth packets all 10 3"
+    );
+    sendCommandLine(
+        source,
+        "bvelocity.command.help-bandwidth-players",
+        ROOT_COMMAND + " bandwidth players all 10"
+    );
+    sendCommandLine(
+        source,
+        "bvelocity.command.help-bandwidth-reset",
+        ROOT_COMMAND + " bandwidth reset"
+    );
   }
 
   private static void sendCopyright(CommandSource source, VelocityServer server) {
@@ -510,6 +831,13 @@ public final class BvCommand {
   private static void sendStatLine(CommandSource source, Component content) {
     source.sendMessage(Component.text()
         .append(Component.text("│ ", MUTED))
+        .append(content)
+        .build());
+  }
+
+  private static void sendNestedLine(CommandSource source, Component content) {
+    source.sendMessage(Component.text()
+        .append(Component.text("│  └ ", MUTED))
         .append(content)
         .build());
   }

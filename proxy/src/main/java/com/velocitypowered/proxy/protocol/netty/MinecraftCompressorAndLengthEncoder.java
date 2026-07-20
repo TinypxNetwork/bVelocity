@@ -26,6 +26,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.MessageToByteEncoder;
 import java.util.zip.DataFormatException;
+import top.notcoral.velocity.bandwidth.BvBandwidthContext;
 import top.notcoral.velocity.compression.BvCompressionStats;
 
 /**
@@ -104,6 +105,7 @@ public class MinecraftCompressorAndLengthEncoder extends MessageToByteEncoder<By
         );
       }
     }
+    BvBandwidthContext.recordOutbound(ctx, out.writerIndex() - initialWriterIndex);
   }
 
   private void handleCompressed(ChannelHandlerContext ctx, ByteBuf msg, ByteBuf out)

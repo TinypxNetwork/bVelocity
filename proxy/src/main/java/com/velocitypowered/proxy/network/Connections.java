@@ -22,6 +22,8 @@ package com.velocitypowered.proxy.network;
  */
 public class Connections {
 
+  public static final String BANDWIDTH_INBOUND = "bandwidth-inbound";
+  public static final String BANDWIDTH_OUTBOUND = "bandwidth-outbound";
   public static final String CIPHER_DECODER = "cipher-decoder";
   public static final String CIPHER_ENCODER = "cipher-encoder";
   public static final String COMPRESSION_DECODER = "compression-decoder";

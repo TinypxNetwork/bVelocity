@@ -64,6 +64,13 @@ compress-bound-headroom = 16
 # hot path fully zero-overhead. When disabled, /bv compression reports an empty window.
 compression-stats-enabled = true
 
+# Collect packet-type, per-player, and packet-by-player public bandwidth statistics for
+# /bv bandwidth. This tracks actual Minecraft frame bytes on player-facing connections after
+# compression (but excludes TCP/IP overhead). The cross-product counters retain disconnected
+# players until the statistics are reset or the proxy restarts. Disable this when the small
+# per-packet accounting overhead matters more than diagnostics. Takes effect after restart.
+packet-bandwidth-stats-enabled = true
+
 # Number of Netty worker (event-loop) threads handling client and backend connections.
 # 0 (the default) uses Netty's default of 2 * availableProcessors(), which is right for most
 # deployments. Lower this on heavily oversold VPS hosts (where availableProcessors() is inflated),

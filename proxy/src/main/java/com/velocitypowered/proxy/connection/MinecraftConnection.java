@@ -428,7 +428,9 @@ public class MinecraftConnection extends ChannelInboundHandlerAdapter {
    */
   public void addPlayPacketQueueOutboundHandler() {
     if (this.channel.pipeline().get(Connections.PLAY_PACKET_QUEUE_OUTBOUND) == null) {
-      this.channel.pipeline().addAfter(Connections.MINECRAFT_ENCODER, Connections.PLAY_PACKET_QUEUE_OUTBOUND,
+      final String insertAfter = this.channel.pipeline().get(Connections.BANDWIDTH_OUTBOUND) == null
+          ? Connections.MINECRAFT_ENCODER : Connections.BANDWIDTH_OUTBOUND;
+      this.channel.pipeline().addAfter(insertAfter, Connections.PLAY_PACKET_QUEUE_OUTBOUND,
            new PlayPacketQueueOutboundHandler(this.protocolVersion,
                channel.pipeline().get(MinecraftEncoder.class).getDirection()));
     }

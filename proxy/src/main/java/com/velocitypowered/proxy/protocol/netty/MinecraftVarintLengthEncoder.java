@@ -24,6 +24,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.MessageToByteEncoder;
+import top.notcoral.velocity.bandwidth.BvBandwidthContext;
 
 /**
  * Handler for appending a length for Minecraft packets.
@@ -47,8 +48,10 @@ public class MinecraftVarintLengthEncoder extends MessageToByteEncoder<ByteBuf> 
     // through the allocator and cipher's ensureCompatible path independently. Writing the length
     // inline reuses the single pre-allocated `out` buffer (sized via allocateBuffer below), which
     // downstream cipher/compressor handlers process as one buffer.
+    final int initialWriterIndex = out.writerIndex();
     ProtocolUtils.writeVarInt(out, buf.readableBytes());
     out.writeBytes(buf);
+    BvBandwidthContext.recordOutbound(ctx, out.writerIndex() - initialWriterIndex);
   }
 
   @Override

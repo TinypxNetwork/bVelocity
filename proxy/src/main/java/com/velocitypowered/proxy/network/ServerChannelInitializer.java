@@ -17,6 +17,8 @@
 
 package com.velocitypowered.proxy.network;
 
+import static com.velocitypowered.proxy.network.Connections.BANDWIDTH_INBOUND;
+import static com.velocitypowered.proxy.network.Connections.BANDWIDTH_OUTBOUND;
 import static com.velocitypowered.proxy.network.Connections.FLUSH_CONSOLIDATION;
 import static com.velocitypowered.proxy.network.Connections.FRAME_DECODER;
 import static com.velocitypowered.proxy.network.Connections.FRAME_ENCODER;
@@ -35,6 +37,8 @@ import com.velocitypowered.proxy.protocol.ProtocolUtils;
 import com.velocitypowered.proxy.protocol.StateRegistry;
 import com.velocitypowered.proxy.protocol.netty.LegacyPingDecoder;
 import com.velocitypowered.proxy.protocol.netty.LegacyPingEncoder;
+import com.velocitypowered.proxy.protocol.netty.MinecraftBandwidthInboundHandler;
+import com.velocitypowered.proxy.protocol.netty.MinecraftBandwidthOutboundHandler;
 import com.velocitypowered.proxy.protocol.netty.MinecraftDecoder;
 import com.velocitypowered.proxy.protocol.netty.MinecraftEncoder;
 import com.velocitypowered.proxy.protocol.netty.MinecraftVarintFrameDecoder;
@@ -77,11 +81,20 @@ public class ServerChannelInitializer extends ChannelInitializer<Channel> {
           optimization.getFlushConsolidationThreshold(), true));
     }
 
+    final MinecraftEncoder minecraftEncoder =
+        new MinecraftEncoder(ProtocolUtils.Direction.CLIENTBOUND);
     ch.pipeline()
         .addLast(MINECRAFT_DECODER, new MinecraftDecoder(ProtocolUtils.Direction.SERVERBOUND))
-        .addLast(MINECRAFT_ENCODER, new MinecraftEncoder(ProtocolUtils.Direction.CLIENTBOUND));
+        .addLast(MINECRAFT_ENCODER, minecraftEncoder);
 
     final MinecraftConnection connection = new MinecraftConnection(ch, this.server);
+    if (this.server.getBvConfiguration().getOptimization().isPacketBandwidthStatsEnabled()) {
+      ch.pipeline()
+          .addAfter(FRAME_DECODER, BANDWIDTH_INBOUND,
+              new MinecraftBandwidthInboundHandler(connection))
+          .addAfter(MINECRAFT_ENCODER, BANDWIDTH_OUTBOUND,
+              new MinecraftBandwidthOutboundHandler(connection, minecraftEncoder));
+    }
     connection.setActiveSessionHandler(StateRegistry.HANDSHAKE,
         new HandshakeSessionHandler(connection, this.server));
     ch.pipeline().addLast(Connections.HANDLER, connection);

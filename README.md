@@ -31,8 +31,8 @@ owns lives in a separate `bvelocity.toml` that is created on first boot if absen
   `velocity.toml`'s `[advanced]` block. If you previously set these in `velocity.toml`, move
   them into `bvelocity.toml`'s `[compression]` section; the old keys in `velocity.toml` are
   ignored.
-- **Optimization knobs** (flush consolidation, output-buffer headroom, compression-statistics
-  collection) live in `bvelocity.toml`'s `[optimization]` section.
+- **Optimization knobs** (flush consolidation, output-buffer headroom, compression statistics,
+  and packet/player bandwidth statistics) live in `bvelocity.toml`'s `[optimization]` section.
 
 Things you should check after switching:
 
@@ -46,6 +46,8 @@ Things you should check after switching:
   - The proxy is still Velocity-based. Existing Velocity plugins and modern forwarding setups should continue to work.
 - monitoring expectations
   - `/bv compression` reports protocol-layer savings, not full NIC-level traffic including TCP/IP overhead.
+  - `/bv bandwidth` reports compressed Minecraft frame bytes on player-facing connections. It
+    excludes TCP/IP overhead and does not double-count backend links.
 
 Recommended migration strategy for cautious operators:
 
@@ -124,6 +126,18 @@ Use these commands after startup:
   - shows aggregate payload and wire savings
 - `/bv compression benchmark`
   - runs a synthetic benchmark across compression levels
+- `/bv bandwidth packets all 10 3`
+  - shows the top 10 packet types and the top 3 contributing players under each type
+- `/bv bandwidth players all 10`
+  - shows the top 10 players by public Minecraft traffic and their share of the total
+- `/bv bandwidth reset`
+  - starts a new packet/player observation window
+
+Bandwidth directions are `outbound` (proxy to players), `inbound` (players to proxy), or `all`.
+Top values are optional and accept `1..50`. Traffic that occurs before authentication, such as
+status queries and login setup, is displayed as unattributed traffic. Disable collection with
+`packet-bandwidth-stats-enabled = false` in `[optimization]` when diagnostics are not needed; this
+setting takes effect after restart.
 
 The benchmark is useful for comparing compression levels. The live stats are what tell you whether your real traffic mix is actually saving bandwidth.
 

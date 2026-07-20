@@ -27,6 +27,11 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.CorruptedFrameException;
+import io.netty.util.collection.IntObjectHashMap;
+import io.netty.util.collection.IntObjectMap;
+import top.notcoral.velocity.bandwidth.BvBandwidthContext;
+import top.notcoral.velocity.bandwidth.BvBandwidthStats.PacketKey;
+import top.notcoral.velocity.bandwidth.BvBandwidthStats.TrafficDirection;
 
 /**
  * Decodes Minecraft packets.
@@ -41,6 +46,7 @@ public class MinecraftDecoder extends ChannelInboundHandlerAdapter {
   private final ProtocolUtils.Direction direction;
   private StateRegistry state;
   private StateRegistry.PacketRegistry.ProtocolRegistry registry;
+  private final IntObjectMap<PacketKey> bandwidthUnknownPacketKeys = new IntObjectHashMap<>();
 
   /**
    * Creates a new {@code MinecraftDecoder} decoding packets from the specified {@code direction}.
@@ -80,6 +86,15 @@ public class MinecraftDecoder extends ChannelInboundHandlerAdapter {
       if (this.direction == ProtocolUtils.Direction.SERVERBOUND && this.state != StateRegistry.PLAY) {
         throw this.handleInvalidPacketId(packetId);
       }
+      if (BvBandwidthContext.hasInboundSample(ctx)) {
+        PacketKey packetKey = bandwidthUnknownPacketKeys.get(packetId);
+        if (packetKey == null) {
+          packetKey = PacketKey.unknown(
+              TrafficDirection.INBOUND, state, registry.version, packetId);
+          bandwidthUnknownPacketKeys.put(packetId, packetKey);
+        }
+        BvBandwidthContext.recordInbound(ctx, packetKey);
+      }
       ctx.fireChannelRead(buf.retain());
     } else {
       if (packet.hasLengthChecks()) {
@@ -94,6 +109,10 @@ public class MinecraftDecoder extends ChannelInboundHandlerAdapter {
 
       if (buf.isReadable()) {
         throw handleOverflow(packet, buf.readerIndex(), buf.writerIndex());
+      }
+      if (BvBandwidthContext.hasInboundSample(ctx)) {
+        BvBandwidthContext.recordInbound(
+            ctx, PacketKey.known(TrafficDirection.INBOUND, packet.getClass()));
       }
       ctx.fireChannelRead(packet);
     }
@@ -152,6 +171,7 @@ public class MinecraftDecoder extends ChannelInboundHandlerAdapter {
 
   public void setProtocolVersion(ProtocolVersion protocolVersion) {
     this.registry = state.getProtocolRegistry(direction, protocolVersion);
+    bandwidthUnknownPacketKeys.clear();
   }
 
   public void setState(StateRegistry state) {

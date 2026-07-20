@@ -34,6 +34,7 @@ import java.util.List;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jspecify.annotations.Nullable;
+import top.notcoral.velocity.bandwidth.BvBandwidthContext;
 
 /**
  * Frames Minecraft server packets which are prefixed by a 21-bit VarInt encoding.
@@ -99,6 +100,7 @@ public class MinecraftVarintFrameDecoder extends ByteToMessageDecoder {
       if (packetStart == in.readerIndex()) {
         return;
       }
+      final int framePrefixBytes = in.readerIndex() - packetStart;
       if (length < 0) {
         throw BAD_PACKET_LENGTH;
       }
@@ -125,6 +127,7 @@ public class MinecraftVarintFrameDecoder extends ByteToMessageDecoder {
                               ctx.channel().remoteAddress()));
             }
           }
+          BvBandwidthContext.enqueueInboundWireSize(ctx, framePrefixBytes + length);
           out.add(in.readRetainedSlice(length));
         }
       }

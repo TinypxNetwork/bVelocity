@@ -36,7 +36,7 @@ import org.apache.logging.log4j.Logger;
  * means the full compression subsystem: the protocol-level {@code compression-threshold} and
  * {@code compression-level} (moved out of {@code velocity.toml}'s {@code [advanced]} block) plus
  * the bVelocity optimization knobs (flush consolidation, output-buffer headroom, compression
- * statistics collection).
+ * statistics collection, packet/player bandwidth diagnostics).
  *
  * <p>The file is optional: if {@code bvelocity.toml} is absent on disk, the bundled
  * {@code default-bvelocity.toml} resource seeds it and the documented defaults apply.
@@ -277,6 +277,8 @@ public final class BvConfiguration {
     @Expose
     private boolean compressionStatsEnabled;
     @Expose
+    private boolean packetBandwidthStatsEnabled;
+    @Expose
     private int eventLoopThreads;
     @Expose
     private int bossThreads;
@@ -297,6 +299,8 @@ public final class BvConfiguration {
             "flush-consolidation-threshold", 256);
         this.compressBoundHeadroom = config.getIntOrElse("compress-bound-headroom", 16);
         this.compressionStatsEnabled = config.getOrElse("compression-stats-enabled", true);
+        this.packetBandwidthStatsEnabled =
+            config.getOrElse("packet-bandwidth-stats-enabled", true);
         this.eventLoopThreads = config.getIntOrElse("event-loop-threads", 0);
         this.bossThreads = config.getIntOrElse("boss-threads", 1);
         this.dnsResolverThreads = config.getIntOrElse("dns-resolver-threads", 2);
@@ -308,6 +312,7 @@ public final class BvConfiguration {
         this.flushConsolidationThreshold = 256;
         this.compressBoundHeadroom = 16;
         this.compressionStatsEnabled = true;
+        this.packetBandwidthStatsEnabled = true;
         this.eventLoopThreads = 0;
         this.bossThreads = 1;
         this.dnsResolverThreads = 2;
@@ -352,6 +357,15 @@ public final class BvConfiguration {
      */
     public boolean isCompressionStatsEnabled() {
       return compressionStatsEnabled;
+    }
+
+    /**
+     * Returns whether public per-packet and per-player bandwidth statistics are collected.
+     *
+     * @return whether packet bandwidth statistics are collected
+     */
+    public boolean isPacketBandwidthStatsEnabled() {
+      return packetBandwidthStatsEnabled;
     }
 
     /**
@@ -408,6 +422,7 @@ public final class BvConfiguration {
           + ", flushConsolidationThreshold=" + flushConsolidationThreshold
           + ", compressBoundHeadroom=" + compressBoundHeadroom
           + ", compressionStatsEnabled=" + compressionStatsEnabled
+          + ", packetBandwidthStatsEnabled=" + packetBandwidthStatsEnabled
           + ", eventLoopThreads=" + eventLoopThreads
           + ", bossThreads=" + bossThreads
           + ", dnsResolverThreads=" + dnsResolverThreads
